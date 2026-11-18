@@ -507,7 +507,7 @@ h1 {
     font-size: 13px;
     font-weight: 650;
 }
-
+}
 @media (max-width: 760px) {
     .app {
         display: flex;
@@ -560,7 +560,7 @@ h1 {
         left: 14px;
     }
 }
-}
+
 @media (prefers-reduced-motion: reduce) {
 
     *,
