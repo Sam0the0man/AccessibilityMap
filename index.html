@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f6f7f5">
+    <title>Rose Hill Campus Map</title>
+    <link rel="preconnect" href="https://unpkg.com">
+    <link rel="preconnect" href="https://tile.openstreetmap.org">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+    <link rel="stylesheet" href="style.css">
+    
+</head>
+<body>
+    <main class="app">
+        <aside class="sidebar" aria-labelledby="page-title">
+            <div class="brand">
+                <span class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M12 21s7-6.1 7-12a7 7 0 1 0-14 0c0 5.9 7 12 7 12Z" stroke="currentColor" stroke-width="1.8"/>
+                        <circle cx="12" cy="9" r="2.4" stroke="currentColor" stroke-width="1.8"/>
+                    </svg>
+                </span>
+                Campus guide
+            </div>
+
+            <p class="eyebrow">Fordham University</p>
+            <h1 id="page-title">Rose Hill<br>Campus</h1>
+            <p class="intro">Explore the campus map and view the places included in the shared walking directions.</p>
+
+            <p class="section-label">Featured place</p>
+            <section class="place-card" aria-label="Featured place: Seismic Observatory">
+                <span class="place-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M3 12h4l2.2-6 4.1 12 2.2-6H21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </span>
+                <div>
+                    <h2>Seismic Observatory</h2>
+                    <p>A destination in the shared Rose Hill walking map.</p>
+                </div>
+            </section>
+
+            <section class="map-notes" aria-labelledby="map-legend-title">
+                <h2 class="section-label" id="map-legend-title">Map key</h2>
+                <div class="legend">
+                    <span class="legend-pin" aria-hidden="true"><span>1</span></span>
+                    <span>Places from the shared map link</span>
+                </div>
+                <p class="route-note">Pins show locations included in the link. Open the original map for the full walking route and turn-by-turn directions.</p>
+            </section>
+
+            <footer class="sidebar-footer">
+                <a class="directions-link" href="https://maps.app.goo.gl/MP8RRAFPBkcHC7h2A" target="_blank" rel="noopener noreferrer">
+                    Open walking directions
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M14 4h6v6m-.5-5.5-9 9M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </a>
+                <p class="attribution-note">Map tiles by OpenStreetMap contributors</p>
+            </footer>
+        </aside>
+
+        <section class="map-shell" aria-label="Interactive Rose Hill Campus map">
+            <div class="map-topbar">
+                <div class="map-status"><span class="status-dot" aria-hidden="true"></span>Rose Hill, Bronx</div>
+                <button class="reset-button" id="reset-view" type="button">
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M4 10V4m0 0h6M4 4l4 4a8 8 0 1 1-2 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    Reset view
+                </button>
+            </div>
+            <div id="map" role="application" aria-label="Map showing locations on Rose Hill Campus"></div>
+        </section>
+    </main>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script>
+        const sharedPlaces = [
+            { name: "Campus place 1", coordinates: [40.8600865, -73.8846497] },
+            { name: "Campus place 2", coordinates: [40.8604449, -73.8838402] },
+            { name: "Campus place 3", coordinates: [40.8621068, -73.8837313] },
+            { name: "Campus place 4", coordinates: [40.8620232, -73.8855916] },
+            { name: "Campus place 5", coordinates: [40.861475, -73.8860378] },
+            { name: "Campus place 6", coordinates: [40.861281, -73.8894435] },
+            { name: "Campus place 7", coordinates: [40.8607936, -73.8865604] },
+            { name: "Seismic Observatory", coordinates: [40.8603169, -73.885185], destination: true },
+            { name: "Campus place 9", coordinates: [40.8596572, -73.8851094] }
+        ];
+
+        const map = L.map("map", { scrollWheelZoom: true });
+
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        const placeBounds = [];
+        sharedPlaces.forEach((place, index) => {
+            const icon = L.divIcon({
+                className: "",
+                html: `<span class="map-pin${place.destination ? " map-pin--destination" : ""}"><span>${place.destination ? "★" : index + 1}</span></span>`,
+                iconSize: place.destination ? [38, 38] : [32, 32],
+                iconAnchor: place.destination ? [19, 34] : [16, 29],
+                popupAnchor: [0, -30]
+            });
+            const marker = L.marker(place.coordinates, { icon, title: place.name, alt: place.name }).addTo(map);
+            marker.bindPopup(place.name);
+            placeBounds.push(place.coordinates);
+        });
+
+        const bounds = L.latLngBounds(placeBounds);
+        const fitMap = () => map.fitBounds(bounds, { padding: [70, 70], maxZoom: 17 });
+        fitMap();
+
+        document.getElementById("reset-view").addEventListener("click", fitMap);
+    </script>
+</body>
+</html>
