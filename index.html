@@ -10,7 +10,6 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
     <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
-
     <script src="script.js" defer></script>
 </head>
 <body>
@@ -28,7 +27,7 @@
 
             <p class="eyebrow">Fordham University</p>
             <h1 id="page-title">Rose Hill<br>Campus</h1>
-            <p class="intro">Choose a campus building and follow mapped accessible paths from your current location.</p>
+            <p class="intro">Choose a starting building and destination to get directions across campus.</p>
 
             <section class="map-mode" aria-labelledby="map-mode-title">
                 <div>
@@ -45,19 +44,34 @@
 
             <section class="buildings-section" aria-labelledby="buildings-title">
                 <h2 class="section-label" id="buildings-title">Available buildings</h2>
-                <p class="route-note">Choose a destination, then request a route from your current location.</p>
-                <ul class="building-list" id="building-list" aria-label="Buildings with mapped paths" aria-busy="true">
-                    <li class="building-list-message">Loading mapped buildings…</li>
-                </ul>
-                <button class="location-button" id="route-button" type="button" disabled>
+                <p class="route-note">Choose two buildings to get directions between them.</p>
+                <div class="route-fields" id="route-fields" aria-busy="true">
+                    <div class="route-field">
+                        <label for="from-building">From</label>
+                        <select class="building-select" id="from-building" disabled>
+                            <option value="">Loading buildings…</option>
+                        </select>
+                    </div>
+                    <div class="route-field">
+                        <label for="to-building">To</label>
+                        <select class="building-select" id="to-building" disabled>
+                            <option value="">Loading buildings…</option>
+                        </select>
+                    </div>
+                </div>
+                <button class="route-button" id="route-button" type="button" disabled>
                     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" stroke="currentColor" stroke-width="1.8"/>
-                        <circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="1.8"/>
+                        <path d="M5 5h14M5 12h14M5 19h14M8 3 5 5l3 2m8 3 3 2-3 2m-8 3-3 2 3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
-                    Route from my location
+                    Show accessibility route
                 </button>
-                <button class="stop-location-button" id="stop-location" type="button" hidden>Stop live location</button>
-                <p class="route-status" id="route-status" role="status" aria-live="polite">Choose a building to get started.</p>
+                <a class="google-route-link" id="google-route-link" href="#" target="_blank" rel="noopener noreferrer" hidden>
+                    Open walking route in Google Maps
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M14 4h6v6m-.5-5.5-9 9M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </a>
+                <p class="route-status" id="route-status" role="status" aria-live="polite">Choose a from and to building.</p>
             </section>
 
             <section class="map-notes" aria-labelledby="map-legend-title">
@@ -72,14 +86,14 @@
                 </div>
                 <div class="legend">
                     <span class="legend-location" aria-hidden="true"></span>
-                    <span>Your live location</span>
+                    <span>Selected buildings</span>
                 </div>
-                <p class="route-note">Routes follow mapped paths. Dotted connectors are direct links to the nearest mapped path.</p>
+                <p class="route-note">Accessibility routes follow paths in the shared map. Normal walking directions open in Google Maps.</p>
             </section>
 
             <footer class="sidebar-footer">
-                <a class="directions-link" id="directions-link" href="https://maps.app.goo.gl/MP8RRAFPBkcHC7h2A" target="_blank" rel="noopener noreferrer">
-                    <span id="directions-link-label">Open walking directions</span>
+                <a class="directions-link" id="directions-link" href="https://www.google.com/maps/d/u/0/edit?mid=1RyGwhJG5wtF7fe4wTgcC9pKru6GbPjs&amp;usp=sharing" target="_blank" rel="noopener noreferrer">
+                    <span>Open accessibility map source</span>
                     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                         <path d="M14 4h6v6m-.5-5.5-9 9M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>

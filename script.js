@@ -1,542 +1,510 @@
-const campusPlaces = [
-    { name: "Campus place 1", coordinates: [40.8600865, -73.8846497] },
-    { name: "Campus place 2", coordinates: [40.8604449, -73.8838402] },
-    { name: "Campus place 3", coordinates: [40.8621068, -73.8837313] },
-    { name: "Campus place 4", coordinates: [40.8620232, -73.8855916] },
-    { name: "Campus place 5", coordinates: [40.861475, -73.8860378] },
-    { name: "Campus place 6", coordinates: [40.861281, -73.8894435] },
-    { name: "Campus place 7", coordinates: [40.8607936, -73.8865604] },
-    { name: "Seismic Observatory", coordinates: [40.8603169, -73.885185], destination: true },
-    { name: "Campus place 9", coordinates: [40.8596572, -73.8851094] }
-];
-
-const accessibilityMapUrl = "https://www.google.com/maps/d/u/0/edit?mid=1RyGwhJG5wtF7fe4wTgcC9pKru6GbPjs&usp=sharing";
-const accessibilityMapKmlUrl = "https://www.google.com/maps/d/kml?mid=1RyGwhJG5wtF7fe4wTgcC9pKru6GbPjs&forcekml=1";
-const kmlNamespace = "http://www.opengis.net/kml/2.2";
+const accessibilityKmlUrl =
+    "https://www.google.com/maps/d/kml?mid=1RyGwhJG5wtF7fe4wTgcC9pKru6GbPjs&forcekml=1";
+const googleMapsDirectionsUrl = "https://www.google.com/maps/dir/";
 const routeJoinDistanceMeters = 10;
-const maxRouteSnapDistanceMeters = 100;
-const earthRadiusMeters = 6371008.8;
+const buildingSnapDistanceMeters = 100;
 
-const map = L.map("map", { scrollWheelZoom: true });
+const map = L.map("map").setView([40.861, -73.885], 16);
 
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 20
 }).addTo(map);
 
-const campusLayer = L.featureGroup();
-campusPlaces.forEach((place, index) => {
-    const icon = L.divIcon({
-        className: "",
-        html: `<span class="map-pin${place.destination ? " map-pin--destination" : ""}"><span>${place.destination ? "★" : index + 1}</span></span>`,
-        iconSize: place.destination ? [38, 38] : [32, 32],
-        iconAnchor: place.destination ? [19, 34] : [16, 29],
-        popupAnchor: [0, -30]
-    });
-    const marker = L.marker(place.coordinates, { icon, title: place.name, alt: place.name }).addTo(campusLayer);
-    marker.bindPopup(place.name);
-});
-campusLayer.addTo(map);
-
-const campusBounds = campusLayer.getBounds();
-let activeLayer = campusLayer;
-let accessibilityDataPromise;
-let accessibilityData;
-let selectedBuilding;
-let locationWatchId = null;
-let currentLocation;
-let currentLocationMarker;
-let locationAccuracyCircle;
-let routeLayer;
-let lastRoutedLocation;
-
 const accessibilityToggle = document.getElementById("accessibility-toggle");
-const directionsLink = document.getElementById("directions-link");
-const directionsLinkLabel = document.getElementById("directions-link-label");
+const mapStatus = document.getElementById("map-status-text");
 const mapModeError = document.getElementById("map-mode-error");
-const mapStatusText = document.getElementById("map-status-text");
-const buildingList = document.getElementById("building-list");
+const routeFields = document.getElementById("route-fields");
+const fromBuildingSelect = document.getElementById("from-building");
+const toBuildingSelect = document.getElementById("to-building");
 const routeButton = document.getElementById("route-button");
-const stopLocationButton = document.getElementById("stop-location");
+const googleRouteLink = document.getElementById("google-route-link");
 const routeStatus = document.getElementById("route-status");
+const resetViewButton = document.getElementById("reset-view");
 
-function distanceMeters(first, second) {
-    const toRadians = (degrees) => degrees * Math.PI / 180;
-    const latitudeDelta = toRadians(second[1] - first[1]);
-    const longitudeDelta = toRadians(second[0] - first[0]);
-    const firstLatitude = toRadians(first[1]);
-    const secondLatitude = toRadians(second[1]);
-    const haversine = Math.sin(latitudeDelta / 2) ** 2 +
-        Math.cos(firstLatitude) * Math.cos(secondLatitude) *
-        Math.sin(longitudeDelta / 2) ** 2;
-    return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+const selectionLayer = L.featureGroup().addTo(map);
+let activeLayer;
+let accessibilityData;
+let accessibilityDataPromise;
+let routeLayer;
+
+function haversineDistance(first, second) {
+    const earthRadiusMeters = 6371000;
+    const radians = Math.PI / 180;
+    const latitudeDifference = (second[1] - first[1]) * radians;
+    const longitudeDifference = (second[0] - first[0]) * radians;
+    const latitudeOne = first[1] * radians;
+    const latitudeTwo = second[1] * radians;
+    const value =
+        Math.sin(latitudeDifference / 2) ** 2 +
+        Math.cos(latitudeOne) *
+            Math.cos(latitudeTwo) *
+            Math.sin(longitudeDifference / 2) ** 2;
+
+    return 2 * earthRadiusMeters * Math.asin(Math.sqrt(value));
 }
 
-function parseCoordinates(element) {
-    const coordinateElement = element.getElementsByTagNameNS(kmlNamespace, "coordinates")[0];
-    if (!coordinateElement) {
-        return [];
-    }
-
-    return coordinateElement.textContent.trim().split(/\s+/).filter(Boolean).map((tuple) => {
-        const [longitudeText, latitudeText] = tuple.split(",");
-        const longitude = Number(longitudeText);
-        const latitude = Number(latitudeText);
-        if (
-            longitudeText === undefined ||
-            latitudeText === undefined ||
-            longitudeText.trim() === "" ||
-            latitudeText.trim() === "" ||
-            !Number.isFinite(longitude) ||
-            !Number.isFinite(latitude) ||
-            Math.abs(longitude) > 180 ||
-            Math.abs(latitude) > 90
-        ) {
-            throw new Error("The accessibility map contains invalid coordinates.");
-        }
-        return [longitude, latitude];
-    });
-}
-
-function parseGeometry(element) {
-    switch (element.localName) {
-        case "Point": {
-            const coordinates = parseCoordinates(element);
-            return coordinates.length ? { type: "Point", coordinates: coordinates[0] } : null;
-        }
-        case "LineString": {
-            const coordinates = parseCoordinates(element);
-            return coordinates.length > 1 ? { type: "LineString", coordinates } : null;
-        }
-        case "Polygon": {
-            const boundaries = Array.from(element.children).filter((child) =>
-                child.localName === "outerBoundaryIs" || child.localName === "innerBoundaryIs"
-            );
-            const rings = boundaries.map(parseCoordinates).filter((coordinates) => coordinates.length >= 4);
-            return rings.length ? { type: "Polygon", coordinates: rings } : null;
-        }
-        case "MultiGeometry": {
-            const geometries = Array.from(element.children).map(parseGeometry).filter(Boolean);
-            return geometries.length ? { type: "GeometryCollection", geometries } : null;
-        }
-        default:
-            return null;
-    }
-}
-
-function parseAccessibilityMap(kmlText) {
-    const document = new DOMParser().parseFromString(kmlText, "application/xml");
-    if (document.getElementsByTagName("parsererror").length) {
-        throw new Error("The accessibility map data could not be parsed.");
-    }
-
-    const features = Array.from(document.getElementsByTagNameNS(kmlNamespace, "Placemark")).flatMap((placemark) => {
-        const geometryElement = Array.from(placemark.children).find((child) =>
-            ["Point", "LineString", "Polygon", "MultiGeometry"].includes(child.localName)
+function parseCoordinates(coordinatesText) {
+    return coordinatesText
+        .trim()
+        .split(/\s+/)
+        .map((coordinate) => {
+            const [longitude, latitude] = coordinate.split(",").map(Number);
+            return [longitude, latitude];
+        })
+        .filter(
+            (coordinate) =>
+                Number.isFinite(coordinate[0]) && Number.isFinite(coordinate[1])
         );
-        const geometry = geometryElement && parseGeometry(geometryElement);
-        if (!geometry) {
-            return [];
+}
+
+function parseKml(kmlText) {
+    const document = new DOMParser().parseFromString(kmlText, "application/xml");
+
+    if (document.querySelector("parsererror")) {
+        throw new Error("The accessibility map returned invalid KML.");
+    }
+
+    const features = [];
+    const placemarks = Array.from(document.getElementsByTagName("Placemark"));
+
+    placemarks.forEach((placemark) => {
+        const name = placemark.getElementsByTagName("name")[0]?.textContent?.trim();
+        const point = placemark.getElementsByTagName("Point")[0];
+        const lineStrings = Array.from(placemark.getElementsByTagName("LineString"));
+
+        if (point) {
+            const coordinates = parseCoordinates(
+                point.getElementsByTagName("coordinates")[0]?.textContent ?? ""
+            );
+            if (coordinates.length) {
+                features.push({
+                    type: "Feature",
+                    properties: { name: name ?? "" },
+                    geometry: { type: "Point", coordinates: coordinates[0] }
+                });
+            }
         }
 
-        const name = placemark.getElementsByTagNameNS(kmlNamespace, "name")[0]?.textContent.trim() || "Campus location";
-        return [{ type: "Feature", properties: { name }, geometry }];
+        lineStrings.forEach((lineString) => {
+            const coordinates = parseCoordinates(
+                lineString.getElementsByTagName("coordinates")[0]?.textContent ?? ""
+            );
+            if (coordinates.length > 1) {
+                features.push({
+                    type: "Feature",
+                    properties: { name: name ?? "" },
+                    geometry: { type: "LineString", coordinates }
+                });
+            }
+        });
     });
-
-    if (!features.length) {
-        throw new Error("The accessibility map does not contain any supported places or paths.");
-    }
 
     return { type: "FeatureCollection", features };
 }
 
-function addGraphEdge(graph, firstId, secondId, weight) {
-    if (firstId === secondId || !Number.isFinite(weight)) {
-        return;
-    }
-
-    const firstEdges = graph.adjacency.get(firstId);
-    const secondEdges = graph.adjacency.get(secondId);
-    if (!firstEdges.has(secondId) || firstEdges.get(secondId) > weight) {
-        firstEdges.set(secondId, weight);
-        secondEdges.set(firstId, weight);
-    }
-}
-
-function buildRouteGraph(featureCollection) {
-    const graph = {
-        nodesById: new Map(),
-        adjacency: new Map(),
-        segments: []
+function getBuildingName(name) {
+    const normalized = name.trim().toLowerCase();
+    const knownBuildings = {
+        dealy: "Dealy Hall",
+        duane: "Duane Library",
+        "duane library": "Duane Library",
+        "hughes hall": "Hughes Hall",
+        hughes: "Hughes Hall",
+        jmh: "John Mulcahy Hall",
+        keating: "Keating Hall",
+        library: "Duane Library",
+        mcshane: "McShane"
     };
-    const nodesByCoordinates = new Map();
-    const lineEndpoints = [];
-    let pathId = 0;
-    let nextNodeId = 0;
 
-    function getNode(coordinates, currentPathId) {
-        const key = `${coordinates[0].toFixed(6)},${coordinates[1].toFixed(6)}`;
-        let node = nodesByCoordinates.get(key);
-        if (!node) {
-            node = { id: nextNodeId++, coordinates, pathIds: new Set() };
-            nodesByCoordinates.set(key, node);
-            graph.nodesById.set(node.id, node);
-            graph.adjacency.set(node.id, new Map());
-        }
-        node.pathIds.add(currentPathId);
-        return node;
-    }
-
-    function addLine(coordinates) {
-        if (coordinates.length < 2) {
-            return;
-        }
-
-        const currentPathId = pathId++;
-        const nodes = coordinates.map((coordinates) => getNode(coordinates, currentPathId));
-        for (let index = 1; index < nodes.length; index += 1) {
-            const first = nodes[index - 1];
-            const second = nodes[index];
-            const length = distanceMeters(first.coordinates, second.coordinates);
-            if (first.id === second.id || length === 0) {
-                continue;
-            }
-            graph.segments.push({
-                id: graph.segments.length,
-                firstId: first.id,
-                secondId: second.id,
-                first: first.coordinates,
-                second: second.coordinates,
-                length,
-                pathId: currentPathId
-            });
-            addGraphEdge(graph, first.id, second.id, length);
-        }
-        lineEndpoints.push({ node: nodes[0], pathId: currentPathId });
-        lineEndpoints.push({ node: nodes[nodes.length - 1], pathId: currentPathId });
-    }
-
-    function addGeometryLines(geometry) {
-        if (geometry.type === "LineString") {
-            addLine(geometry.coordinates);
-        } else if (geometry.type === "GeometryCollection") {
-            geometry.geometries.forEach(addGeometryLines);
-        }
-    }
-
-    featureCollection.features.forEach((feature) => addGeometryLines(feature.geometry));
-    if (!graph.segments.length) {
-        throw new Error("The accessibility map does not contain any route paths.");
-    }
-
-    const nodes = Array.from(graph.nodesById.values());
-    lineEndpoints.forEach(({ node, pathId: endpointPathId }) => {
-        nodes.forEach((candidate) => {
-            if (
-                candidate.id === node.id ||
-                !Array.from(candidate.pathIds).some((candidatePathId) => candidatePathId !== endpointPathId)
-            ) {
-                return;
-            }
-            const gap = distanceMeters(node.coordinates, candidate.coordinates);
-            if (gap <= routeJoinDistanceMeters) {
-                addGraphEdge(graph, node.id, candidate.id, gap);
-            }
-        });
-    });
-
-    return graph;
-}
-
-function projectToSegment(point, segment) {
-    const longitudeScale = 111320 * Math.cos(point[1] * Math.PI / 180);
-    const latitudeScale = 111320;
-    const deltaX = (segment.second[0] - segment.first[0]) * longitudeScale;
-    const deltaY = (segment.second[1] - segment.first[1]) * latitudeScale;
-    const pointX = (point[0] - segment.first[0]) * longitudeScale;
-    const pointY = (point[1] - segment.first[1]) * latitudeScale;
-    const squaredLength = deltaX * deltaX + deltaY * deltaY;
-    const progress = squaredLength === 0
-        ? 0
-        : Math.max(0, Math.min(1, (pointX * deltaX + pointY * deltaY) / squaredLength));
-    const coordinates = [
-        segment.first[0] + (segment.second[0] - segment.first[0]) * progress,
-        segment.first[1] + (segment.second[1] - segment.first[1]) * progress
-    ];
-    return {
-        segment,
-        progress,
-        coordinates,
-        distance: distanceMeters(point, coordinates)
-    };
-}
-
-function nearestRouteProjection(coordinates, graph) {
-    let nearest;
-    graph.segments.forEach((segment) => {
-        const projection = projectToSegment(coordinates, segment);
-        if (!nearest || projection.distance < nearest.distance) {
-            nearest = projection;
-        }
-    });
-    return nearest;
-}
-
-function shortestPath(graph, startId, destinationId) {
-    const distances = new Map([[startId, 0]]);
-    const previous = new Map();
-    const remaining = new Set(graph.nodesById.keys());
-
-    while (remaining.size) {
-        let currentId;
-        let currentDistance = Infinity;
-        remaining.forEach((nodeId) => {
-            const candidateDistance = distances.get(nodeId);
-            if (candidateDistance !== undefined && candidateDistance < currentDistance) {
-                currentId = nodeId;
-                currentDistance = candidateDistance;
-            }
-        });
-
-        if (currentId === undefined) {
-            break;
-        }
-        remaining.delete(currentId);
-        if (currentId === destinationId) {
-            break;
-        }
-
-        graph.adjacency.get(currentId).forEach((edgeDistance, neighborId) => {
-            if (!remaining.has(neighborId)) {
-                return;
-            }
-            const nextDistance = currentDistance + edgeDistance;
-            if (nextDistance < (distances.get(neighborId) ?? Infinity)) {
-                distances.set(neighborId, nextDistance);
-                previous.set(neighborId, currentId);
-            }
-        });
-    }
-
-    if (!distances.has(destinationId)) {
+    if (
+        !normalized ||
+        normalized === "campus" ||
+        normalized === "fordham" ||
+        /^point\s+\d+$/i.test(normalized)
+    ) {
         return null;
     }
 
-    const nodeIds = [destinationId];
-    while (nodeIds[0] !== startId) {
-        const predecessor = previous.get(nodeIds[0]);
-        if (predecessor === undefined) {
-            return null;
+    return (
+        knownBuildings[normalized] ??
+        (normalized === "441 e fordham rd" ? "Duane Library" : name.trim())
+    );
+}
+
+function buildRouteGraph(features) {
+    const segments = [];
+    const vertices = [];
+    const edges = [];
+    const vertexBuckets = new Map();
+    const bucketSizeDegrees = 0.00012;
+
+    function bucketKey(coordinate) {
+        return `${Math.round(coordinate[0] / bucketSizeDegrees)},${Math.round(
+            coordinate[1] / bucketSizeDegrees
+        )}`;
+    }
+
+    function findOrAddVertex(coordinate) {
+        const [bucketX, bucketY] = bucketKey(coordinate).split(",").map(Number);
+        const nearbyVertices = [];
+
+        for (let x = bucketX - 1; x <= bucketX + 1; x += 1) {
+            for (let y = bucketY - 1; y <= bucketY + 1; y += 1) {
+                nearbyVertices.push(...(vertexBuckets.get(`${x},${y}`) ?? []));
+            }
         }
-        nodeIds.unshift(predecessor);
-    }
-    return { distance: distances.get(destinationId), nodeIds };
-}
 
-function findRoute(graph, startProjection, destinationProjection) {
-    const startSegment = startProjection.segment;
-    const destinationSegment = destinationProjection.segment;
-    if (startSegment.id === destinationSegment.id) {
-        const distance = Math.abs(startProjection.progress - destinationProjection.progress) * startSegment.length;
-        return {
-            distance,
-            coordinates: [startProjection.coordinates, destinationProjection.coordinates]
-        };
+        const nearby = nearbyVertices.find(
+            (vertex) =>
+                haversineDistance(vertex.coordinate, coordinate) <=
+                routeJoinDistanceMeters
+        );
+        if (nearby) {
+            return nearby.id;
+        }
+
+        const id = vertices.length;
+        const vertex = { id, coordinate };
+        vertices.push(vertex);
+        edges.push([]);
+
+        const key = bucketKey(coordinate);
+        const bucket = vertexBuckets.get(key) ?? [];
+        bucket.push(vertex);
+        vertexBuckets.set(key, bucket);
+        return id;
     }
 
-    const startOptions = [
-        { nodeId: startSegment.firstId, distance: startProjection.progress * startSegment.length },
-        { nodeId: startSegment.secondId, distance: (1 - startProjection.progress) * startSegment.length }
-    ];
-    const destinationOptions = [
-        { nodeId: destinationSegment.firstId, distance: destinationProjection.progress * destinationSegment.length },
-        { nodeId: destinationSegment.secondId, distance: (1 - destinationProjection.progress) * destinationSegment.length }
-    ];
-
-    let bestRoute;
-    startOptions.forEach((start) => {
-        destinationOptions.forEach((destination) => {
-            const path = shortestPath(graph, start.nodeId, destination.nodeId);
-            if (!path) {
-                return;
-            }
-            const distance = start.distance + path.distance + destination.distance;
-            if (bestRoute && distance >= bestRoute.distance) {
-                return;
-            }
-            bestRoute = {
-                distance,
-                coordinates: [
-                    startProjection.coordinates,
-                    ...path.nodeIds.map((id) => graph.nodesById.get(id).coordinates),
-                    destinationProjection.coordinates
-                ]
-            };
-        });
-    });
-    return bestRoute || null;
-}
-
-function canonicalBuildingName(name) {
-    const trimmed = name.trim();
-    if (/^point\s*\d+$/i.test(trimmed)) {
-        return null;
-    }
-    if (/^(jmh|john mulcahy hall)/i.test(trimmed)) {
-        return "John Mulcahy Hall";
-    }
-    if (/^(keating|keating hall)/i.test(trimmed)) {
-        return "Keating Hall";
-    }
-    if (/^(library|441 e fordham rd)/i.test(trimmed)) {
-        return "Duane Library";
-    }
-    if (/^mcshane\b/i.test(trimmed)) {
-        return "McShane";
-    }
-    if (/^hughes\b/i.test(trimmed)) {
-        return "Hughes Hall";
-    }
-    if (/^dealy\b/i.test(trimmed)) {
-        return "Dealy Hall";
-    }
-    if (/^thebaud hall/i.test(trimmed)) {
-        return "Thebaud Hall";
-    }
-    return trimmed.split(",")[0].trim();
-}
-
-function getAvailableBuildings(featureCollection, graph) {
-    const buildingsByName = new Map();
-    featureCollection.features.forEach((feature) => {
-        if (feature.geometry.type !== "Point") {
+    features.forEach((feature) => {
+        if (feature.geometry?.type !== "LineString") {
             return;
         }
 
-        const name = canonicalBuildingName(feature.properties.name);
-        if (!name) {
-            return;
-        }
         const coordinates = feature.geometry.coordinates;
-        const routeProjection = nearestRouteProjection(coordinates, graph);
-        if (!routeProjection || routeProjection.distance > maxRouteSnapDistanceMeters) {
-            return;
-        }
+        for (let index = 0; index < coordinates.length - 1; index += 1) {
+            const start = coordinates[index];
+            const end = coordinates[index + 1];
+            const startId = findOrAddVertex(start);
+            const endId = findOrAddVertex(end);
+            const distance = haversineDistance(start, end);
 
-        const key = name.toLocaleLowerCase();
-        const existing = buildingsByName.get(key);
-        if (!existing || routeProjection.distance < existing.routeDistance) {
-            buildingsByName.set(key, { name, coordinates, routeDistance: routeProjection.distance });
+            if (startId !== endId && distance > 0) {
+                edges[startId].push({ vertex: endId, distance });
+                edges[endId].push({ vertex: startId, distance });
+                segments.push({ start, end, startId, endId });
+            }
         }
     });
 
-    return Array.from(buildingsByName.values()).sort((first, second) => first.name.localeCompare(second.name));
+    return { vertices, edges, segments };
 }
 
-function createAccessibilityData(featureCollection) {
-    const routeGraph = buildRouteGraph(featureCollection);
-    const buildings = getAvailableBuildings(featureCollection, routeGraph);
-    if (!buildings.length) {
-        throw new Error("The accessibility map does not contain any buildings connected to mapped paths.");
+function projectPointToSegment(point, start, end) {
+    const latitudeScale = 111320;
+    const longitudeScale = latitudeScale * Math.cos((point[1] * Math.PI) / 180);
+    const toMeters = ([longitude, latitude]) => [
+        longitude * longitudeScale,
+        latitude * latitudeScale
+    ];
+    const pointMeters = toMeters(point);
+    const startMeters = toMeters(start);
+    const endMeters = toMeters(end);
+    const deltaX = endMeters[0] - startMeters[0];
+    const deltaY = endMeters[1] - startMeters[1];
+    const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+    const fraction =
+        lengthSquared === 0
+            ? 0
+            : Math.max(
+                  0,
+                  Math.min(
+                      1,
+                      ((pointMeters[0] - startMeters[0]) * deltaX +
+                          (pointMeters[1] - startMeters[1]) * deltaY) /
+                          lengthSquared
+                  )
+              );
+    const projectedMeters = [
+        startMeters[0] + fraction * deltaX,
+        startMeters[1] + fraction * deltaY
+    ];
+    const projected = [
+        projectedMeters[0] / longitudeScale,
+        projectedMeters[1] / latitudeScale
+    ];
+
+    return {
+        coordinate: projected,
+        fraction,
+        distance: haversineDistance(point, projected)
+    };
+}
+
+function snapPointToRoute(point, graph) {
+    let closest;
+
+    graph.segments.forEach((segment) => {
+        const projection = projectPointToSegment(point, segment.start, segment.end);
+        if (!closest || projection.distance < closest.distance) {
+            closest = {
+                ...projection,
+                segment,
+                startDistance:
+                    haversineDistance(segment.start, projection.coordinate),
+                endDistance:
+                    haversineDistance(projection.coordinate, segment.end)
+            };
+        }
+    });
+
+    return closest;
+}
+
+function findRoute(graph, startId, endId) {
+    const distances = new Array(graph.vertices.length).fill(Infinity);
+    const previous = new Array(graph.vertices.length).fill(null);
+    const visited = new Set();
+    distances[startId] = 0;
+
+    while (visited.size < graph.vertices.length) {
+        let current = -1;
+        let shortestDistance = Infinity;
+
+        for (let index = 0; index < distances.length; index += 1) {
+            if (!visited.has(index) && distances[index] < shortestDistance) {
+                current = index;
+                shortestDistance = distances[index];
+            }
+        }
+
+        if (current === -1 || current === endId) {
+            break;
+        }
+        visited.add(current);
+
+        graph.edges[current].forEach((edge) => {
+            const candidateDistance = shortestDistance + edge.distance;
+            if (candidateDistance < distances[edge.vertex]) {
+                distances[edge.vertex] = candidateDistance;
+                previous[edge.vertex] = current;
+            }
+        });
     }
 
-    const layer = L.geoJSON(featureCollection, {
-        pointToLayer: (_feature, coordinates) => L.circleMarker(coordinates, {
-            radius: 8,
-            color: "#ffffff",
+    if (!Number.isFinite(distances[endId])) {
+        return null;
+    }
+
+    const path = [];
+    let current = endId;
+    while (current !== null) {
+        path.push(graph.vertices[current].coordinate);
+        current = previous[current];
+    }
+
+    return { coordinates: path.reverse(), distance: distances[endId] };
+}
+
+function findShortestRoute(graph, start, end) {
+    if (!start || !end) {
+        return null;
+    }
+
+    const startCandidates = [
+        { vertex: start.segment.startId, distance: start.startDistance },
+        { vertex: start.segment.endId, distance: start.endDistance }
+    ];
+    const endCandidates = [
+        { vertex: end.segment.startId, distance: end.startDistance },
+        { vertex: end.segment.endId, distance: end.endDistance }
+    ];
+    let shortest =
+        start.segment === end.segment
+            ? {
+                  coordinates: [start.coordinate, end.coordinate],
+                  distance: haversineDistance(start.coordinate, end.coordinate),
+                  direct: true
+              }
+            : null;
+
+    startCandidates.forEach((startCandidate) => {
+        endCandidates.forEach((endCandidate) => {
+            const route = findRoute(
+                graph,
+                startCandidate.vertex,
+                endCandidate.vertex
+            );
+            if (!route) {
+                return;
+            }
+
+            const distance =
+                startCandidate.distance + route.distance + endCandidate.distance;
+            if (!shortest || distance < shortest.distance) {
+                shortest = {
+                    ...route,
+                    distance,
+                    direct: false,
+                };
+            }
+        });
+    });
+
+    if (!shortest) {
+        return null;
+    }
+
+    return {
+        coordinates: shortest.direct
+            ? shortest.coordinates
+            : [start.coordinate, ...shortest.coordinates, end.coordinate],
+        distance: shortest.distance,
+        startCoordinate: start.coordinate,
+        endCoordinate: end.coordinate
+    };
+}
+
+function findAvailableBuildings(features, graph) {
+    const buildingsByName = new Map();
+
+    features.forEach((feature) => {
+        if (feature.geometry?.type !== "Point") {
+            return;
+        }
+
+        const name = getBuildingName(feature.properties?.name ?? "");
+        if (!name || buildingsByName.has(name)) {
+            return;
+        }
+
+        const coordinates = feature.geometry.coordinates;
+        const snap = snapPointToRoute(coordinates, graph);
+        if (snap && snap.distance <= buildingSnapDistanceMeters) {
+            buildingsByName.set(name, { name, coordinates, snapDistance: snap.distance });
+        }
+    });
+
+    return Array.from(buildingsByName.values()).sort((first, second) =>
+        first.name.localeCompare(second.name)
+    );
+}
+
+function createAccessibilityData(collection) {
+    const graph = buildRouteGraph(collection.features);
+    const buildings = findAvailableBuildings(collection.features, graph);
+    const accessibilityLayer = L.geoJSON(collection, {
+        style: (feature) =>
+            feature.geometry?.type === "LineString"
+                ? { color: "#0877a5", weight: 4, opacity: 0.82 }
+                : { color: "#860038", weight: 2, fillOpacity: 0.82 },
+        pointToLayer: (feature, latlng) =>
+            L.circleMarker(latlng, {
+                radius: 6,
+                color: "#fff",
+                weight: 2,
+                fillColor: "#860038",
+                fillOpacity: 1
+            }).bindPopup(feature.properties?.name ?? "Campus location")
+    });
+    const buildingLayer = L.featureGroup();
+
+    buildings.forEach((building) => {
+        L.circleMarker([building.coordinates[1], building.coordinates[0]], {
+            radius: 6,
+            color: "#fff",
             weight: 2,
             fillColor: "#860038",
             fillOpacity: 1
-        }),
-        style: () => ({
-            color: "#860038",
-            weight: 5,
-            opacity: 0.9,
-            lineCap: "round",
-            lineJoin: "round"
-        }),
-        onEachFeature: (feature, featureLayer) => {
-            const popup = document.createElement("span");
-            popup.textContent = feature.properties.name;
-            featureLayer.bindPopup(popup);
-        }
+        })
+            .bindPopup(building.name)
+            .addTo(buildingLayer);
     });
-    if (!layer.getBounds().isValid()) {
-        throw new Error("The accessibility map contains no valid locations.");
-    }
 
-    return { layer, routeGraph, buildings };
+    return { accessibilityLayer, buildingLayer, buildings, graph };
 }
 
 async function loadAccessibilityData() {
     if (!accessibilityDataPromise) {
-        accessibilityDataPromise = fetch(accessibilityMapKmlUrl)
+        accessibilityDataPromise = fetch(accessibilityKmlUrl)
             .then((response) => {
                 if (!response.ok) {
-                    throw new Error(`Accessibility map request failed with status ${response.status}.`);
+                    throw new Error(
+                        `Unable to load the accessibility map (HTTP ${response.status}).`
+                    );
                 }
                 return response.text();
             })
-            .then(parseAccessibilityMap)
-            .then(createAccessibilityData);
+            .then(parseKml)
+            .then(createAccessibilityData)
+            .then((data) => {
+                if (!data.buildings.length || !data.graph.segments.length) {
+                    throw new Error(
+                        "The accessibility map has no buildings or walking paths to route."
+                    );
+                }
+                accessibilityData = data;
+                return data;
+            })
+            .catch((error) => {
+                accessibilityDataPromise = null;
+                throw error;
+            });
     }
 
-    try {
-        accessibilityData = await accessibilityDataPromise;
-        return accessibilityData;
-    } catch (error) {
-        accessibilityDataPromise = undefined;
-        throw error;
-    }
+    return accessibilityDataPromise;
 }
 
-function renderBuildings(buildings) {
-    buildingList.replaceChildren();
-    buildingList.setAttribute("aria-busy", "false");
-    buildings.forEach((building) => {
-        const item = document.createElement("li");
-        const button = document.createElement("button");
-        button.className = "building-option";
-        button.type = "button";
-        button.textContent = building.name;
-        button.setAttribute("aria-pressed", String(selectedBuilding?.name === building.name));
-        button.addEventListener("click", () => {
-            selectedBuilding = building;
-            buildingList.querySelectorAll(".building-option").forEach((option) => {
-                option.setAttribute("aria-pressed", String(option === button));
-            });
-            routeButton.disabled = false;
-            clearRoute();
-            lastRoutedLocation = undefined;
-            routeStatus.textContent = `${building.name} selected. Start location sharing to see the route.`;
-            if (currentLocation) {
-                updateDisplayedRoute();
-            }
+function setBuildingOptions(buildings) {
+    const placeholder = (label) => {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = label;
+        return option;
+    };
+
+    [fromBuildingSelect, toBuildingSelect].forEach((select) => {
+        select.replaceChildren(placeholder("Choose a building"));
+        buildings.forEach((building) => {
+            const option = document.createElement("option");
+            option.value = building.name;
+            option.textContent = building.name;
+            select.append(option);
         });
-        item.append(button);
-        buildingList.append(item);
+        select.disabled = buildings.length === 0;
     });
 
-    if (!buildings.length) {
-        const message = document.createElement("li");
-        message.className = "building-list-message";
-        message.textContent = "No buildings with mapped paths are available.";
-        buildingList.append(message);
-    }
-    routeButton.disabled = !selectedBuilding;
+    routeFields.setAttribute("aria-busy", "false");
 }
 
-function fitActiveLayer() {
-    if (routeLayer) {
-        const bounds = routeLayer.getBounds();
-        if (currentLocation) {
-            bounds.extend([currentLocation.coordinates[1], currentLocation.coordinates[0]]);
-        }
-        map.fitBounds(bounds, { padding: [70, 70], maxZoom: 18 });
-        return;
-    }
-    const bounds = activeLayer === campusLayer ? campusBounds : activeLayer.getBounds();
-    map.fitBounds(bounds, { padding: [70, 70], maxZoom: 17 });
+function getSelectedBuildings() {
+    const from = accessibilityData?.buildings.find(
+        (building) => building.name === fromBuildingSelect.value
+    );
+    const to = accessibilityData?.buildings.find(
+        (building) => building.name === toBuildingSelect.value
+    );
+
+    return {
+        from,
+        to,
+        valid: Boolean(from && to && from.name !== to.name)
+    };
+}
+
+function createGoogleDirectionsUrl(from, to) {
+    const url = new URL(googleMapsDirectionsUrl);
+    url.searchParams.set("api", "1");
+    url.searchParams.set(
+        "origin",
+        `${from.coordinates[1]},${from.coordinates[0]}`
+    );
+    url.searchParams.set(
+        "destination",
+        `${to.coordinates[1]},${to.coordinates[0]}`
+    );
+    url.searchParams.set("travelmode", "walking");
+    return url.toString();
 }
 
 function clearRoute() {
@@ -546,271 +514,259 @@ function clearRoute() {
     routeLayer = undefined;
 }
 
-function stopLocationTracking(announce = true) {
-    if (locationWatchId !== null && navigator.geolocation) {
-        navigator.geolocation.clearWatch(locationWatchId);
+function updateSelectedBuildingMarkers(from, to, valid) {
+    selectionLayer.clearLayers();
+    if (valid) {
+        L.circleMarker([from.coordinates[1], from.coordinates[0]], {
+            radius: 8,
+            color: "#fff",
+            weight: 3,
+            fillColor: "#0877a5",
+            fillOpacity: 1
+        })
+            .bindPopup(`From: ${from.name}`)
+            .addTo(selectionLayer);
+        L.circleMarker([to.coordinates[1], to.coordinates[0]], {
+            radius: 8,
+            color: "#fff",
+            weight: 3,
+            fillColor: "#c96a3d",
+            fillOpacity: 1
+        })
+            .bindPopup(`To: ${to.name}`)
+            .addTo(selectionLayer);
     }
-    locationWatchId = null;
-    currentLocation = undefined;
-    lastRoutedLocation = undefined;
-    if (currentLocationMarker && map.hasLayer(currentLocationMarker)) {
-        map.removeLayer(currentLocationMarker);
+
+    if (map.hasLayer(selectionLayer)) {
+        map.removeLayer(selectionLayer);
     }
-    if (locationAccuracyCircle && map.hasLayer(locationAccuracyCircle)) {
-        map.removeLayer(locationAccuracyCircle);
+    selectionLayer.addTo(map);
+}
+
+function fitActiveLayer() {
+    if (routeLayer?.getLayers().length) {
+        map.fitBounds(routeLayer.getBounds(), { padding: [28, 28] });
+        return;
     }
-    currentLocationMarker = undefined;
-    locationAccuracyCircle = undefined;
-    clearRoute();
-    stopLocationButton.hidden = true;
-    routeButton.disabled = !selectedBuilding;
-    if (announce) {
-        routeStatus.textContent = "Live location stopped.";
+    if (selectionLayer.getLayers().length) {
+        map.fitBounds(selectionLayer.getBounds(), { padding: [40, 40] });
+        return;
+    }
+    if (activeLayer?.getBounds && activeLayer.getLayers().length) {
+        map.fitBounds(activeLayer.getBounds(), { padding: [24, 24] });
+    }
+}
+
+function resetMapView() {
+    if (routeLayer?.getLayers().length) {
+        map.fitBounds(routeLayer.getBounds(), { padding: [28, 28] });
+        return;
+    }
+    if (activeLayer?.getBounds && activeLayer.getLayers().length) {
+        map.fitBounds(activeLayer.getBounds(), { padding: [24, 24] });
+        return;
+    }
+    map.setView([40.861, -73.885], 16);
+}
+
+function updateRouteControls(fitSelection = true) {
+    const { from, to, valid } = getSelectedBuildings();
+    const accessibilityMode = accessibilityToggle.checked;
+
+    routeButton.hidden = !accessibilityMode;
+    routeButton.disabled = !valid;
+    googleRouteLink.hidden = accessibilityMode || !valid;
+    if (valid) {
+        googleRouteLink.href = createGoogleDirectionsUrl(from, to);
+        routeStatus.textContent = accessibilityMode
+            ? `Ready to show the accessible route from ${from.name} to ${to.name}.`
+            : `Open Google Maps for a walking route from ${from.name} to ${to.name}.`;
+    } else {
+        googleRouteLink.removeAttribute("href");
+        routeStatus.textContent =
+            from && to
+                ? "Choose different buildings for the start and destination."
+                : "Choose a starting building and a destination.";
+    }
+
+    updateSelectedBuildingMarkers(from, to, valid);
+    if (fitSelection && valid && !routeLayer) {
+        fitActiveLayer();
     }
 }
 
 async function updateMapMode() {
     const useAccessibilityMap = accessibilityToggle.checked;
+    clearRoute();
     mapModeError.hidden = true;
-    directionsLink.href = useAccessibilityMap
-        ? accessibilityMapUrl
-        : "https://maps.app.goo.gl/MP8RRAFPBkcHC7h2A";
-    directionsLinkLabel.textContent = useAccessibilityMap
-        ? "Open accessibility map"
-        : "Open walking directions";
+    mapStatus.textContent = "Loading campus locations…";
 
-    if (!useAccessibilityMap) {
-        stopLocationTracking(false);
-        if (map.hasLayer(activeLayer)) {
-            map.removeLayer(activeLayer);
-        }
-        campusLayer.addTo(map);
-        activeLayer = campusLayer;
-        mapStatusText.textContent = "Rose Hill, Bronx · Campus map";
-        routeStatus.textContent = "Accessibility routes are hidden. Turn on the accessibility map to route.";
-        fitActiveLayer();
-        return true;
-    }
-
-    mapStatusText.textContent = "Loading accessibility map…";
     try {
         const data = await loadAccessibilityData();
-        renderBuildings(data.buildings);
-        if (!accessibilityToggle.checked) {
+        if (accessibilityToggle.checked !== useAccessibilityMap) {
             return false;
         }
-        if (map.hasLayer(activeLayer)) {
+
+        const nextLayer = useAccessibilityMap
+            ? data.accessibilityLayer
+            : data.buildingLayer;
+        if (activeLayer && map.hasLayer(activeLayer)) {
             map.removeLayer(activeLayer);
         }
-        data.layer.addTo(map);
-        activeLayer = data.layer;
-        mapStatusText.textContent = "Rose Hill, Bronx · Accessibility map";
+        nextLayer.addTo(map);
+        activeLayer = nextLayer;
+        mapStatus.textContent = useAccessibilityMap
+            ? "Accessibility map enabled"
+            : "Campus map enabled";
+        updateRouteControls(false);
         fitActiveLayer();
         return true;
     } catch (error) {
-        if (!accessibilityToggle.checked) {
-            return false;
-        }
-        console.error("Could not load the accessibility map.", error);
-        mapStatusText.textContent = "Accessibility map unavailable";
-        mapModeError.textContent = "The accessibility map could not be loaded. Try opening it directly in Google Maps.";
+        console.error("Unable to change map mode:", error);
+        mapModeError.textContent =
+            error instanceof Error
+                ? error.message
+                : "The map could not be loaded. Please try again.";
         mapModeError.hidden = false;
-        buildingList.replaceChildren();
-        buildingList.setAttribute("aria-busy", "false");
-        const message = document.createElement("li");
-        message.className = "building-list-message";
-        message.textContent = "Buildings could not be loaded. Check your connection and try again.";
-        buildingList.append(message);
-        routeStatus.textContent = "Available buildings require the accessibility map.";
-        routeButton.disabled = true;
+        mapStatus.textContent = "Map data could not be loaded";
         return false;
     }
 }
 
-function updateDisplayedRoute() {
-    if (!accessibilityData || !selectedBuilding || !currentLocation) {
+function showAccessibilityRoute() {
+    const { from, to, valid } = getSelectedBuildings();
+    if (!accessibilityToggle.checked || !valid || !accessibilityData) {
         return;
     }
 
-    lastRoutedLocation = currentLocation.coordinates;
-    const graph = accessibilityData.routeGraph;
-    const startProjection = nearestRouteProjection(currentLocation.coordinates, graph);
-    const destinationProjection = nearestRouteProjection(selectedBuilding.coordinates, graph);
-    if (!startProjection || startProjection.distance > maxRouteSnapDistanceMeters) {
-        clearRoute();
-        routeStatus.textContent = "You are too far from a mapped path. Move closer to campus paths and try again.";
-        return;
-    }
-    if (!destinationProjection || destinationProjection.distance > maxRouteSnapDistanceMeters) {
-        clearRoute();
-        routeStatus.textContent = `No mapped path reaches ${selectedBuilding.name}.`;
+    const start = snapPointToRoute(from.coordinates, accessibilityData.graph);
+    const end = snapPointToRoute(to.coordinates, accessibilityData.graph);
+    if (
+        !start ||
+        !end ||
+        start.distance > buildingSnapDistanceMeters ||
+        end.distance > buildingSnapDistanceMeters
+    ) {
+        routeStatus.textContent =
+            "One or both buildings are not close enough to an accessibility path.";
         return;
     }
 
-    const route = findRoute(graph, startProjection, destinationProjection);
+    const route = findShortestRoute(accessibilityData.graph, start, end);
     if (!route) {
-        clearRoute();
-        routeStatus.textContent = `No connected mapped route reaches ${selectedBuilding.name} from here.`;
+        routeStatus.textContent =
+            "No connected accessibility route is available between these buildings.";
         return;
     }
 
-    const shouldFitRoute = !routeLayer;
     clearRoute();
-    const routePoints = route.coordinates.map(([longitude, latitude]) => [latitude, longitude]);
+    selectionLayer.clearLayers();
+    const routeCoordinates = route.coordinates.map((coordinate) => [
+        coordinate[1],
+        coordinate[0]
+    ]);
     const layers = [
-        L.polyline(routePoints, {
-            color: "#0877a5",
+        L.polyline(routeCoordinates, {
+            color: "#c96a3d",
             weight: 7,
             opacity: 0.95,
             lineCap: "round",
             lineJoin: "round"
-        })
-    ];
-    if (startProjection.distance > 2) {
-        layers.push(L.polyline([
-            [currentLocation.coordinates[1], currentLocation.coordinates[0]],
-            [startProjection.coordinates[1], startProjection.coordinates[0]]
-        ], { color: "#0877a5", weight: 3, opacity: 0.85, dashArray: "5 7" }));
-    }
-    if (destinationProjection.distance > 2) {
-        layers.push(L.polyline([
-            [destinationProjection.coordinates[1], destinationProjection.coordinates[0]],
-            [selectedBuilding.coordinates[1], selectedBuilding.coordinates[0]]
-        ], { color: "#0877a5", weight: 3, opacity: 0.85, dashArray: "5 7" }));
-    }
-    layers.push(L.circleMarker([
-        selectedBuilding.coordinates[1],
-        selectedBuilding.coordinates[0]
-    ], {
-        radius: 10,
-        color: "#ffffff",
-        weight: 3,
-        fillColor: "#c96a3d",
-        fillOpacity: 1
-    }).bindPopup(selectedBuilding.name));
-    routeLayer = L.featureGroup(layers).addTo(map);
-    currentLocationMarker.bringToFront();
-
-    const approximateMeters = Math.round(route.distance + startProjection.distance + destinationProjection.distance);
-    const accuracy = Math.round(currentLocation.accuracy);
-    routeStatus.textContent = `About ${approximateMeters} m to ${selectedBuilding.name} along mapped paths. Location accuracy ±${accuracy} m.`;
-    if (shouldFitRoute) {
-        const bounds = routeLayer.getBounds().extend([
-            currentLocation.coordinates[1],
-            currentLocation.coordinates[0]
-        ]);
-        map.fitBounds(bounds, { padding: [70, 70], maxZoom: 18 });
-    }
-}
-
-function updateLiveLocation(position) {
-    const coordinates = [position.coords.longitude, position.coords.latitude];
-    const accuracy = Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : 0;
-    currentLocation = { coordinates, accuracy };
-    const latLng = [coordinates[1], coordinates[0]];
-
-    if (!locationAccuracyCircle) {
-        locationAccuracyCircle = L.circle(latLng, {
-            radius: accuracy,
-            color: "#0877a5",
-            weight: 1,
-            fillColor: "#0877a5",
-            fillOpacity: 0.12
-        }).addTo(map);
-        currentLocationMarker = L.circleMarker(latLng, {
+        }),
+        L.polyline(
+            [
+                [from.coordinates[1], from.coordinates[0]],
+                [route.startCoordinate[1], route.startCoordinate[0]]
+            ],
+            {
+                color: "#0877a5",
+                weight: 4,
+                opacity: 0.85,
+                dashArray: "6 7"
+            }
+        ),
+        L.polyline(
+            [
+                [route.endCoordinate[1], route.endCoordinate[0]],
+                [to.coordinates[1], to.coordinates[0]]
+            ],
+            {
+                color: "#0877a5",
+                weight: 4,
+                opacity: 0.85,
+                dashArray: "6 7"
+            }
+        ),
+        L.circleMarker([from.coordinates[1], from.coordinates[0]], {
             radius: 8,
-            color: "#ffffff",
+            color: "#fff",
             weight: 3,
             fillColor: "#0877a5",
             fillOpacity: 1
-        }).addTo(map);
-        currentLocationMarker.bindPopup("Your live location");
-    } else {
-        locationAccuracyCircle.setLatLng(latLng).setRadius(accuracy);
-        currentLocationMarker.setLatLng(latLng);
-    }
+        }).bindPopup(`From: ${from.name}`),
+        L.circleMarker([to.coordinates[1], to.coordinates[0]], {
+            radius: 8,
+            color: "#fff",
+            weight: 3,
+            fillColor: "#c96a3d",
+            fillOpacity: 1
+        }).bindPopup(`To: ${to.name}`)
+    ];
 
-    if (
-        selectedBuilding &&
-        (!lastRoutedLocation || distanceMeters(lastRoutedLocation, coordinates) >= 10)
-    ) {
-        updateDisplayedRoute();
-    } else if (!selectedBuilding) {
-        routeStatus.textContent = "Live location found. Select a building to see the route.";
-    }
+    routeLayer = L.featureGroup(layers).addTo(map);
+    map.fitBounds(routeLayer.getBounds(), { padding: [40, 40] });
+    routeStatus.textContent = `Accessible route from ${from.name} to ${to.name} is shown. Mapped path distance: approximately ${Math.round(route.distance)} m.`;
 }
 
-function handleLocationError(error) {
-    const messages = {
-        1: "Location permission was denied. Allow location access in your browser to get a route.",
-        2: "Your location is unavailable right now. Check your device location settings.",
-        3: "Getting your location timed out. Try again."
-    };
-    const message = messages[error.code] || "Your location could not be determined.";
-    if (error.code === 1) {
-        stopLocationTracking(false);
-    }
-    routeStatus.textContent = message;
-}
+async function initialize() {
+    routeFields.setAttribute("aria-busy", "true");
+    fromBuildingSelect.disabled = true;
+    toBuildingSelect.disabled = true;
 
-async function startRouteFromLocation() {
-    if (!selectedBuilding) {
-        routeStatus.textContent = "Choose a destination building first.";
-        return;
-    }
-    if (!accessibilityToggle.checked) {
-        accessibilityToggle.checked = true;
-        if (!await updateMapMode()) {
-            return;
-        }
-    }
-    if (!window.isSecureContext) {
-        routeStatus.textContent = "Live location requires a secure connection (HTTPS) or localhost.";
-        return;
-    }
-    if (!navigator.geolocation) {
-        routeStatus.textContent = "This browser does not support live location.";
-        return;
-    }
-    if (locationWatchId !== null) {
-        return;
-    }
-
-    clearRoute();
-    routeButton.disabled = true;
-    stopLocationButton.hidden = false;
-    routeStatus.textContent = "Requesting your location. Allow access in your browser to continue.";
     try {
-        locationWatchId = navigator.geolocation.watchPosition(updateLiveLocation, handleLocationError, {
-            enableHighAccuracy: true,
-            maximumAge: 5000,
-            timeout: 15000
-        });
-    } catch (error) {
-        console.error("Could not start live location.", error);
-        routeButton.disabled = false;
-        stopLocationButton.hidden = true;
-        routeStatus.textContent = "Live location could not be started. Check browser permissions and try again.";
-    }
-}
+        const data = await loadAccessibilityData();
+        setBuildingOptions(data.buildings);
 
-function initialize() {
-    if (accessibilityToggle.checked) {
-        updateMapMode();
-    } else {
-        loadAccessibilityData()
-            .then((data) => renderBuildings(data.buildings))
-            .catch((error) => {
-                console.error("Could not load available buildings.", error);
-                routeStatus.textContent = "Available buildings could not be loaded.";
-            });
+        const useAccessibilityMap = accessibilityToggle.checked;
+        activeLayer = useAccessibilityMap
+            ? data.accessibilityLayer
+            : data.buildingLayer;
+        activeLayer.addTo(map);
+        mapStatus.textContent = useAccessibilityMap
+            ? "Accessibility map enabled"
+            : "Campus map enabled";
+        updateRouteControls(false);
+        fitActiveLayer();
+    } catch (error) {
+        console.error("Unable to initialize the campus map:", error);
+        const message =
+            error instanceof Error
+                ? error.message
+                : "The campus map could not be loaded. Please refresh to try again.";
+        mapStatus.textContent = "Map data could not be loaded";
+        mapModeError.textContent = message;
+        mapModeError.hidden = false;
+        setBuildingOptions([]);
+        fromBuildingSelect.replaceChildren(
+            new Option("Building list unavailable", "")
+        );
+        toBuildingSelect.replaceChildren(
+            new Option("Building list unavailable", "")
+        );
+        routeStatus.textContent = "Building choices could not be loaded.";
     }
 }
 
 accessibilityToggle.addEventListener("change", updateMapMode);
-routeButton.addEventListener("click", startRouteFromLocation);
-stopLocationButton.addEventListener("click", () => stopLocationTracking());
-document.getElementById("reset-view").addEventListener("click", fitActiveLayer);
+resetViewButton.addEventListener("click", resetMapView);
+fromBuildingSelect.addEventListener("change", () => {
+    clearRoute();
+    updateRouteControls();
+});
+toBuildingSelect.addEventListener("change", () => {
+    clearRoute();
+    updateRouteControls();
+});
+routeButton.addEventListener("click", showAccessibilityRoute);
 
-map.fitBounds(campusBounds, { padding: [70, 70], maxZoom: 17 });
 initialize();

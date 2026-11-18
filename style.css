@@ -213,75 +213,52 @@ h1 {
     margin: 0;
 }
 
-.building-list {
-    display: flex;
-    max-height: 235px;
-    flex-direction: column;
-    gap: 5px;
-    margin: 13px 0 14px;
-    padding: 0 3px 0 0;
-    overflow-y: auto;
-    list-style: none;
+.route-fields {
+    display: grid;
+    gap: 12px;
+    margin: 16px 0;
 }
 
-.building-option {
-    display: flex;
+.route-field label {
+    display: block;
+    margin-bottom: 6px;
+    color: #48574f;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.building-select {
     width: 100%;
-    min-height: 40px;
-    align-items: center;
-    justify-content: space-between;
-    padding: 9px 12px;
+    min-height: 43px;
+    padding: 0 12px;
     color: #334139;
     background: #fff;
     border: 1px solid #e6eae6;
     border-radius: 9px;
-    font-size: 12px;
-    font-weight: 620;
-    text-align: left;
+    font-size: 13px;
     cursor: pointer;
-    transition: background .16s ease, border-color .16s ease;
 }
 
-.building-option::after {
-    width: 7px;
-    height: 7px;
-    flex: 0 0 auto;
-    margin-left: 10px;
-    border-top: 1.5px solid currentColor;
-    border-right: 1.5px solid currentColor;
-    content: "";
-    transform: rotate(45deg);
-}
-
-.building-option:hover {
-    background: #f8f6f7;
-    border-color: #d3b6c3;
-}
-
-.building-option[aria-pressed="true"] {
-    color: #74002f;
-    background: #f8edf2;
+.building-select:focus-visible {
     border-color: #860038;
+    outline: 3px solid #8600382e;
+    outline-offset: 1px;
 }
 
-.building-option:focus-visible,
-.location-button:focus-visible,
-.stop-location-button:focus-visible {
+.building-select:disabled {
+    color: #89928d;
+    background: #f3f5f3;
+    cursor: wait;
+}
+
+.route-button:focus-visible,
+.google-route-link:focus-visible {
     outline: 3px solid #f1ae4e;
     outline-offset: 2px;
 }
 
-.building-list-message {
-    padding: 14px 12px;
-    color: #6a7771;
-    background: #f3f5f3;
-    border-radius: 9px;
-    font-size: 12px;
-    line-height: 1.5;
-}
-
-.location-button,
-.stop-location-button {
+.route-button,
+.google-route-link {
     display: flex;
     width: 100%;
     min-height: 46px;
@@ -295,34 +272,32 @@ h1 {
     border-radius: 10px;
     font-size: 12px;
     font-weight: 700;
-    cursor: pointer;
+    text-decoration: none;
     transition: background .18s ease, opacity .18s ease;
 }
 
-.location-button:hover:not(:disabled) {
+.route-button:hover:not(:disabled) {
     background: #6f002e;
 }
 
-.location-button:disabled {
+.route-button:disabled {
     cursor: not-allowed;
     opacity: .48;
 }
 
-.location-button svg {
+.route-button svg,
+.google-route-link svg {
     width: 17px;
     height: 17px;
 }
 
-.stop-location-button {
-    min-height: 38px;
-    margin-top: 8px;
-    color: #5b625e;
-    background: #fff;
-    border-color: #dce2dd;
+.google-route-link:hover {
+    background: #6f002e;
 }
 
-.stop-location-button:hover {
-    background: #f2f4f2;
+.route-button[hidden],
+.google-route-link[hidden] {
+    display: none;
 }
 
 .route-status {
@@ -561,10 +536,6 @@ h1 {
 
     .map-notes {
         display: none;
-    }
-
-    .building-list {
-        max-height: 170px;
     }
 
     .sidebar-footer {
